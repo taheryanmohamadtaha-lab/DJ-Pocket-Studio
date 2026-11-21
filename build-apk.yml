@@ -1,0 +1,65 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build Debug APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Name Debug APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk DJ_Pocket_Studio_Debug.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DJ_Pocket_Studio_Debug
+          path: DJ_Pocket_Studio_Debug.apk
+
+      - name: Build Release APK (version tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export KEYSTORE_PATH="$RUNNER_TEMP/release.jks"
+            echo "Signing release with provided keystore"
+          else
+            echo "::warning::No signing secrets set - release APK will be UNSIGNED and NOT installable"
+          fi
+          gradle --no-daemon assembleRelease
+          if [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk DJ_Pocket_Studio_Release.apk
+          else
+            cp app/build/outputs/apk/release/app-release-unsigned.apk DJ_Pocket_Studio_Release_UNSIGNED_not_installable.apk
+          fi
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            DJ_Pocket_Studio_Release*.apk
+            DJ_Pocket_Studio_Debug.apk
